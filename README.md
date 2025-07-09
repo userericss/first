@@ -49,20 +49,18 @@ def speak(text):
     engine.runAndWait()
 
 
-# Obtener el clima a través de wttr.in
+# Clima
 def get_weather(city: str) -> str:
     format = "|Condicion : %C |Temperatura : %t |Sensación termica : %f |Humedad : %h |Viento : %w |"
     base_url = f"https://wttr.in/{city}?format={format}"
-# Formato: descripción + temperatura
+
     response = requests.get(base_url)
 
     if response.status_code == 200:
         return response.text.strip()
     else:
         return "No se pudo obtener la información del clima. Por favor, inténtalo más tarde."
-
-
-# Manejador de comando !weather
+        
 @bot.command()
 async def weather(ctx, *, city: str):
     weather_info = get_weather(city)
@@ -102,7 +100,7 @@ async def traducir(ctx, idioma_destino: str, *, texto: str):
         await ctx.send(f"⚠️ Error al traducir: {e}")
 
 
-# Bot tirar dado y adivinar numero
+# Bot tirar dado 
 @bot.command(name='dado')
 async def dado(ctx):
     await ctx.send(f"🎲 Has sacado un {random.randint(1, 6)}")
