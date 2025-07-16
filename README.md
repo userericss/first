@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 from sympy import sympify
 import pytz
+from discord import app_commands
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -49,18 +50,20 @@ def speak(text):
     engine.runAndWait()
 
 
-# Clima
+# Obtener el clima a través de wttr.in
 def get_weather(city: str) -> str:
     format = "|Condicion : %C |Temperatura : %t |Sensación termica : %f |Humedad : %h |Viento : %w |"
     base_url = f"https://wttr.in/{city}?format={format}"
-
+# Formato: descripción + temperatura
     response = requests.get(base_url)
 
     if response.status_code == 200:
         return response.text.strip()
     else:
         return "No se pudo obtener la información del clima. Por favor, inténtalo más tarde."
-        
+
+
+# Manejador de comando !weather
 @bot.command()
 async def weather(ctx, *, city: str):
     weather_info = get_weather(city)
@@ -100,20 +103,48 @@ async def traducir(ctx, idioma_destino: str, *, texto: str):
         await ctx.send(f"⚠️ Error al traducir: {e}")
 
 
-# Bot tirar dado 
+# Bot tirar dado
 @bot.command(name='dado')
 async def dado(ctx):
     await ctx.send(f"🎲 Has sacado un {random.randint(1, 6)}")
 
 
-# Adivinar numero entre 1 y 10
+# Adivinar numero entre 1 y 20
+juegos = {}
+
+
 @bot.command(name='adivina')
-async def adivina(ctx, numero: int):
-    secreto = random.randint(0, 10)
-    if numero == secreto:
-        await ctx.send("🎉 ¡Correcto!")
+async def iniciar_juego(ctx):
+    user_id = ctx.author.id
+    if user_id in juegos:
+        await ctx.send("🎮 Ya tienes un juego en curso. Usa `!intento <número>` para seguir jugando.")
     else:
-        await ctx.send(f"❌ Nope. El número era {secreto}")
+        numero = random.randint(1, 20)
+        juegos[user_id] = {"numero": numero, "intentos": 5}
+        await ctx.send("🎯 He pensado un número entre 1 y 20. ¡Tienes 5 intentos! Usa `!intento <número>` para adivinar.")
+
+
+@bot.command(name='intento')
+async def hacer_intento(ctx, intento: int):
+    user_id = ctx.author.id
+    if user_id not in juegos:
+        await ctx.send("❗ No has iniciado un juego. Usa `!adivina` para empezar.")
+        return
+
+    juego = juegos[user_id]
+    numero_objetivo = juego["numero"]
+
+    if intento == numero_objetivo:
+        await ctx.send(f"🎉 ¡Correcto! El número era {numero_objetivo}. ¡Ganaste!")
+        del juegos[user_id]
+    else:
+        juego["intentos"] -= 1
+        if juego["intentos"] <= 0:
+            await ctx.send(f"💥 Has perdido. El número era {numero_objetivo}. Usa `!adivina` para volver a jugar.")
+            del juegos[user_id]
+        else:
+            pista = "mayor" if intento < numero_objetivo else "menor"
+            await ctx.send(f"❌ No es {intento}. El número es **{pista}**. Te quedan {juego['intentos']} intento(s).")
 
 
 # Recordatorio
@@ -158,10 +189,6 @@ async def calc(ctx, *, expresion: str):
 
 
 # Zonas horarias
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-
 @bot.command(name='zonahoraria')
 async def convertir_zona_horaria(ctx, fecha: str, hora: str, zona_origen: str, zona_destino: str):
     try:
@@ -182,6 +209,90 @@ async def convertir_zona_horaria(ctx, fecha: str, hora: str, zona_origen: str, z
             "❌ Formato inválido.\n"
             "Usa: `!zonahoraria YYYY-MM-DD HH:MM zona_origen zona_destino`\n"
             "Ejemplo: `!zonahoraria 2025-07-02 14:00 America/Mexico_City Europe/Madrid`"
+        )
+
+
+# Sinonimos y antonimos
+def obtener_sinonimos(palabra):
+    response = requests.get(f"https://api.datamuse.com/words?rel_syn={palabra}")
+    datos = response.json()
+    return [item["word"] for item in datos[:10]]
+
+
+def obtener_antonimos(palabra):
+    response = requests.get(f"https://api.datamuse.com/words?rel_ant={palabra}")
+    datos = response.json()
+    return [item["word"] for item in datos[:10]]
+
+
+@bot.command(name='sinonimo')
+async def sinonimos_y_antonimos(ctx, palabra: str):
+    sinonimos = obtener_sinonimos(palabra)
+    antonimos = obtener_antonimos(palabra)
+
+    sin_texto = ', '.join(sinonimos) if sinonimos else "No se encontraron sinónimos."
+    ant_texto = ', '.join(antonimos) if antonimos else "No se encontraron antónimos."
+
+    await ctx.send(f"🔁 **Sinónimos de _{palabra}_:** {sin_texto}")
+    await ctx.send(f"↔️ **Antónimos de _{palabra}_:** {ant_texto}")
+
+
+# Factores de conversión 
+conversiones = {
+    "longitud": {
+        ("km", "mi"): 0.621371,
+        ("m", "yd"): 1.09361,
+        ("m", "ft"): 3.28084,
+        ("cm", "in"): 0.393701
+    },
+    "masa": {
+        ("kg", "lb"): 2.20462,
+        ("g", "oz"): 0.035274
+    },
+    "volumen": {
+        ("l", "gal"): 0.264172,
+        ("l", "qt"): 1.05669,
+        ("l", "pt"): 2.11338,
+        ("ml", "fl oz"): 0.033814
+    }
+}
+
+def convertir(valor, unidad_origen, unidad_destino):
+    unidad_origen = unidad_origen.lower()
+    unidad_destino = unidad_destino.lower()
+
+    for categoria in conversiones.values():
+        if (unidad_origen, unidad_destino) in categoria:
+            factor = categoria[(unidad_origen, unidad_destino)]
+            return round(valor * factor, 6)
+
+    return None
+
+@bot.event
+async def on_ready():
+    print(f"✅ Bot conectado como {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"🌐 {len(synced)} comandos sincronizados.")
+    except Exception as e:
+        print("❌ Error al sincronizar comandos:", e)
+
+@bot.tree.command(name="convertir", description="Convierte unidades métricas a imperiales.")
+@app_commands.describe(
+    valor="Cantidad a convertir",
+    unidad_origen="Unidad métrica (ej. km, m, g, l)",
+    unidad_destino="Unidad imperial (ej. mi, yd, lb, gal)"
+)
+async def convertir_cmd(interaction: discord.Interaction, valor: float, unidad_origen: str, unidad_destino: str):
+    resultado = convertir(valor, unidad_origen, unidad_destino)
+    if resultado is not None:
+        await interaction.response.send_message(
+            f"✅ {valor} {unidad_origen} = {resultado} {unidad_destino}"
+        )
+    else:
+        await interaction.response.send_message(
+            "❌ Conversión no soportada. Ejemplos: km → mi, m → ft, l → gal, kg → lb",
+            ephemeral=True
         )
 
 bot.run(token)
